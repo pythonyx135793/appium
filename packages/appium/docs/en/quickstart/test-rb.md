@@ -39,7 +39,7 @@ The `appium_lib_core` is the main part as an Appium client.
 `appium_lib_core` does not have such a global variable.
 
 This example is by the `appium_lib_core` with `test-unit` gem module.
-Test code in `appium_lib` should be similar.
+Tes code in `appium_lib` should be similar.
 
 ```ruby title="test.rb"
 --8<-- "./sample-code/quickstarts/rb/test.rb"

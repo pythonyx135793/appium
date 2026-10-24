@@ -80,9 +80,8 @@ The required subfields are:
   capability to tell Appium to use *your* driver.
 * `platformNames`: this is an array of one or more platform names considered valid for your driver.
   When a user sends in the `platformName` capability to start a session, it must be included in
-  this list for your driver to handle the session. These names should generally include the
-  operating systems your driver is targeting - for example, a driver targeting iOS would include
-  `iOS`, while a driver targeting the Chrome browser on Windows would include `Windows`.
+  this list for your driver to handle the session. Known platform name strings include: `iOS`,
+  `tvOS`, `macOS`, `Windows`, `Android`.
 * `mainClass`: this is a named export (in CommonJS style) from your `main` field. It must be a
   class which extends Appium's `BaseDriver` (see below).
 
@@ -121,11 +120,6 @@ to install it locally first:
 ```
 appium driver install --source=local /path/to/your/driver
 ```
-
-Install the driver's dependencies and build it in its source directory first. A local install
-links that directory directly into Appium's home without creating a global npm link or copying
-the source. Changes remain available for development; see [Refreshing your driver during
-development](#refreshing-your-driver-during-development) for when Appium reloads them.
 
 ### Developing your driver
 
@@ -235,16 +229,6 @@ async createSession(w3cCaps) {
 }
 ```
 
-!!! warning "Deprecated"
-
-    Older drivers may still define `createSession` with up to four parameters, e.g.
-    `createSession(jwpCaps, reqCaps, w3cCaps, otherDriverData)`. This shape is a holdover from the
-    retired JSON Wire Protocol, which required desired and required caps as the first two
-    arguments; only the first W3C-shaped argument was ever used. The `otherDriverData` parameter is
-    likewise deprecated in favor of [IPC](#send-messages-to-plugins-running-on-the-same-session) for
-    coordinating with other concurrently-running sessions. New drivers should use the single-argument
-    form shown above.
-
 You'll want to make sure to call `super.createSession` in order to get the session ID as well as
 the processed capabilities (note that capabilities are also set on `this.caps`; modifying `caps`
 locally here would have no effect other than changing what the user sees in the create session
@@ -287,8 +271,8 @@ You handle WebDriver commands by implementing functions in your driver class. Ea
 WebDriver Protocol, plus the various Appium extensions, has a corresponding function that you
 implement if you want to support that command in your driver. The best way to see which commands
 Appium supports and which method you need to implement for each command is to look at Appium's
-[routes/](https://github.com/appium/appium/tree/master/packages/base-driver/lib/protocol/routes).
-Each route object in this directory's files tells you the command name as well as the parameters you'd expect to
+[routes.js](https://github.com/appium/appium/blob/master/packages/base-driver/lib/protocol/routes.js).
+Each route object in this file tells you the command name as well as the parameters you'd expect to
 receive for that command.
 
 Let's take this block for example:
@@ -329,7 +313,7 @@ Websockets. Implementing handlers for BiDi commands works just the same as imple
 for WebDriver classic commands (described in the previous section). You simply define a method on
 your driver of the appropriate name, and it will be called when the BiDi command is requested by
 the client. To see which specific names you should use for BiDi commands, have a look at
-[bidi-commands.ts](https://github.com/appium/appium/blob/master/packages/base-driver/lib/protocol/bidi-commands.ts)
+[bidi-commands.js](https://github.com/appium/appium/blob/master/packages/base-driver/lib/protocol/bidi-commands.js)
 
 You are not limited to BiDi commands that are defined in the official BiDi specification. If you
 wish to define new commands, you may do so; you just need to tell Appium about them! See
@@ -550,7 +534,7 @@ this.proxyCommand = proxy.command.bind(proxy);
 Here we are creating a proxy object and assigning some of its methods to `this` under the names
 `proxyReqRes` and `proxyCommand`. This is required for Appium to use the proxy, so don't forget
 this step! The `WebDriverProxy` has a variety of other options [which you can check out in the
-source code as well.](https://github.com/appium/appium/blob/master/packages/base-driver/lib/jsonwp-proxy/proxy.ts)
+source code as well.](https://github.com/appium/appium/blob/master/packages/base-driver/lib/wd-proxy/proxy.ts)
 
 Finally, we need a way to tell Appium when the proxy is active. For your driver it might always
 be active, or it might only be active when in a certain context. You can define the logic as an
@@ -730,6 +714,12 @@ A couple notes about this system:
    mode!
 1. The `executeMethod` helper will reject with an error if a script name doesn't match one of the
    script names defined as a command in `executeMethodMap`, or if there are missing parameters.
+1. If your driver is written in TypeScript, declare the map `as const satisfies
+   ExecuteMethodMap<MyDriver>` (with `ExecuteMethodMap` imported from `@appium/types`). The
+   compiler then checks that each `command` names a method of your driver, and that the
+   `required`/`optional` params are consistent with that method's signature: the method must not
+   require a parameter which is listed as `optional` (or not listed at all), and must accept all
+   of the listed parameters.
 
 One of the nice things about the Execute Method strategy is that methods implemented in this way
 will be available via the classic or BiDi interfaces (since they will result in the same Appium
@@ -804,50 +794,32 @@ that multiple simultaneous sessions don't use the same resources:
 
 1. Have your users specify resource IDs via capabilities (`appium:driverPort` etc)
 1. Just always use free resources (find a new random port for each session)
-1. Have each driver express what resources it is using, then examine currently-used resources from
-   other drivers when a new session begins.
+1. Have each running instance of your driver publish and subscribe to messages on a shared IPC
+   channel, so sessions can coordinate directly with one another.
 
-!!! warning "Deprecated"
-
-    The `driverData`-based mechanism described below is deprecated. Prefer
-    [IPC](#send-messages-to-plugins-running-on-the-same-session) for coordinating resources across
-    concurrently-running sessions instead.
-
-To support this third strategy, you can implement `get driverData` in your driver to return what
-sorts of resources your driver is currently using, for example:
-
-```js
-get driverData() {
-  return {specialPort: 1234, specialFile: /path/to/file}
-}
-```
-
-Now, when a new session is started on your driver, the `driverData` response from any other
-simultaneously running drivers (of the same type) will also be included, as the last parameter of
-the deprecated, multi-argument form of the `createSession` method:
-
-```js
-async createSession(jwpCaps, reqCaps, w3cCaps, driverData)
-```
-
-You can dig into this `driverData` array to see what resources other drivers are using to help
-determine which ones you want to use for this particular session.
+The per-session IPC channel described in [Send messages to plugins running on the same
+session](#send-messages-to-plugins-running-on-the-same-session) is isolated per session, so it
+can't be used for this: it doesn't let you talk to *other* sessions of your driver. Instead,
+construct and hold on to your own `AppiumIpc` instance (exported from `appium/driver.js`) at
+module scope in your driver's package, for example as a memoized singleton. Since Node.js caches
+modules, every instance of your driver loaded within the same Appium server process will share
+that one `AppiumIpc` object, and can use it to publish and subscribe to topics across sessions —
+the same way the per-session channel works, just not scoped to a single session. See
+[xcuitest-driver's `session-claim-handler.ts`](https://github.com/appium/appium-xcuitest-driver/blob/master/lib/session-claim-handler.ts)
+for a real example, which uses this technique to detect and resolve conflicting sessions targeting
+the same device UDID.
 
 !!! warning
 
-    Be careful here, since `driverData` is only passed between sessions of a single running Appium
-    server. There's nothing to stop a user from running multiple Appium servers and requesting your
-    driver simultaneously on each of them. In this case, you won't be able to ensure independence
-    of resources via `driverData`, so you might consider using file-based locking mechanisms or
-    something similar.
+    This only works for sessions running within the same Node.js process (i.e. the same Appium
+    server). It cannot coordinate sessions running on different Appium server processes; for that,
+    consider file-based locking or a similar out-of-process mechanism.
 
 !!! warning
 
-    It's also important to note you will only receive `driverData` for other instances of *your*
-    driver. So unrelated drivers also running may still be using some system resources. In general
-    Appium doesn't provide any features for ensuring unrelated drivers don't interfere with one
-    another, so it's up to the drivers to allow users to specify resource locations or addresses to
-    avoid clashes.
+    Appium also doesn't provide any features for ensuring unrelated drivers don't interfere with
+    one another, so it's up to the drivers to allow users to specify resource locations or
+    addresses to avoid clashes.
 
 ### Log events to the Appium event timeline
 
@@ -995,10 +967,15 @@ export type IpcMessage<T> = {
 #### IPC Notes
 
 There are some important things to keep in mind when using Appium's IPC feature:
-- IPC is only available once `onIpcInit` has been called, at the end of the `createSession` flow.
-  It cannot be used statically or in `createSession` hooks
-- In sum, IPC is only for use during a session (this is also to prevent drivers/plugins from
-  accessing or reading data sent on IPC channels in other sessions.)
+- The `ipcSubscribe` method (and the IPC channel it subscribes to) is only available once
+  `onIpcInit` has been called, at the end of the `createSession` flow. It cannot be used statically
+  or in `createSession` hooks
+- The channel that `ipcSubscribe` gives you access to is scoped to the current session, and is
+  shared only with the plugins active in that same session (this is also to prevent drivers/plugins
+  from accessing or reading data sent on IPC channels in other sessions.) To coordinate across
+  multiple concurrent sessions of your own driver instead, see [Make itself aware of resources
+  other concurrent drivers are
+  using](#make-itself-aware-of-resources-other-concurrent-drivers-are-using).
 - The default max size of an IPC message is 1MB. This can be configured by the server-admin by
   using the `--max-ipc-data-size` arg (value is a number in bytes).
 - If a message exceeds the configured size, any call to `publish` methods will throw, so be

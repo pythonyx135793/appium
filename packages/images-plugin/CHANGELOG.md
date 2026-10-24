@@ -3,12 +3,59 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
-## [5.0.1](https://github.com/appium/appium/compare/@appium/images-plugin@5.0.0...@appium/images-plugin@5.0.1) (2026-09-24)
+## [6.0.0-beta.5](https://github.com/appium/appium/compare/@appium/images-plugin@6.0.0-beta.4...@appium/images-plugin@6.0.0-beta.5) (2026-10-18)
+
+### Bug Fixes
+
+* **images-plugin:** return every image match from findElements ([#22926](https://github.com/appium/appium/issues/22926)) ([b0b2ce9](https://github.com/appium/appium/commit/b0b2ce903caa48def6ed28984aaec59afe26519a))
+
+
+## [6.0.0-beta.4](https://github.com/appium/appium/compare/@appium/images-plugin@6.0.0-beta.3...@appium/images-plugin@6.0.0-beta.4) (2026-10-09)
 
 **Note:** Version bump only for package @appium/images-plugin
 
 
 
+
+
+## [6.0.0-beta.3](https://github.com/appium/appium/compare/@appium/images-plugin@6.0.0-beta.2...@appium/images-plugin@6.0.0-beta.3) (2026-10-05)
+
+**Note:** Version bump only for package @appium/images-plugin
+
+
+
+
+
+## [6.0.0-beta.2](https://github.com/appium/appium/compare/@appium/images-plugin@6.0.0-beta.1...@appium/images-plugin@6.0.0-beta.2) (2026-09-27)
+
+**Note:** Version bump only for package @appium/images-plugin
+
+
+
+
+
+## [6.0.0-beta.1](https://github.com/appium/appium/compare/@appium/images-plugin@6.0.0-beta.0...@appium/images-plugin@6.0.0-beta.1) (2026-09-19)
+
+### Bug Fixes
+
+* **deps:** catch up peerDependencies to published beta.0; drop bootstrap_packages ([#22793](https://github.com/appium/appium/issues/22793)) ([b09efc3](https://github.com/appium/appium/commit/b09efc31c6967bbcf2c4314db9d2a0b6454fa8fb))
+
+
+## [6.0.0-beta.0](https://github.com/appium/appium/compare/@appium/images-plugin@5.0.0...@appium/images-plugin@6.0.0-beta.0) (2026-09-19)
+
+### ⚠ BREAKING CHANGES
+
+* the minimum supported Node.js engine is set to ^22.22.2 || ^24.15.0 || &gt;&#x3D;26.0.0
+
+### Features
+
+* backport diff from master ([#22749](https://github.com/appium/appium/issues/22749)) ([6323df1](https://github.com/appium/appium/commit/6323df1d7354f85cc631508f5cb6a3e35270d4bd))
+* bump minimum supported Node.js engine to ^22.22.2 || ^24.15.0 || &gt;&#x3D;26.0.0 ([#22685](https://github.com/appium/appium/issues/22685)) ([9f4a11e](https://github.com/appium/appium/commit/9f4a11e7190290986d01743557e90e6e44f87638))
+
+### Bug Fixes
+
+* Address several TODOs ([#22762](https://github.com/appium/appium/issues/22762)) ([d6ef7e3](https://github.com/appium/appium/commit/d6ef7e3f1240f161df622c850aea06637f9d1078))
+* declare dependencies that were only resolving via hoisting ([#22758](https://github.com/appium/appium/issues/22758)) ([bcf1c57](https://github.com/appium/appium/commit/bcf1c579997b8dbb8292b1a77583aeef40b11ba4))
 
 
 ## [5.0.0](https://github.com/appium/appium/compare/@appium/images-plugin@4.2.8...@appium/images-plugin@5.0.0) (2026-08-24)

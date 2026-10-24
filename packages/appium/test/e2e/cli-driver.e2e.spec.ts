@@ -4,8 +4,8 @@ import {describe, it, before, after, beforeEach, type TestContext} from 'node:te
 
 import {fs, system, tempDir, util} from '@appium/support';
 import type {DriverType} from '@appium/types';
-import type {ExtRecord} from 'appium/types';
-import {prerelease} from 'semver';
+import type {ExtRecord} from 'appium/types/index.js';
+import * as semver from 'semver';
 import {exec} from 'teen_process';
 
 import {
@@ -16,12 +16,51 @@ import {
   EXT_SUBCOMMAND_RUN as RUN,
   EXT_SUBCOMMAND_UNINSTALL as UNINSTALL,
   KNOWN_DRIVERS,
-} from '../../lib/constants';
-import {omitKeys, resolveFrom} from '../../lib/utils';
-import {FAKE_DRIVER_DIR, resolveFixture} from '../helpers';
-import {installLocalExtension, runAppiumJson, runAppiumRaw} from './e2e-helpers';
+} from '../../lib/constants.js';
+import {APPIUM_VER} from '../../lib/helpers/build.js';
+import {omitKeys, resolveFrom} from '../../lib/utils/index.js';
+import {FAKE_DRIVER_DIR, resolveFixture} from '../helpers.js';
+import {installLocalExtension, runAppiumJson, runAppiumRaw} from './e2e-helpers.js';
 
 const TEST_DRIVER_DIR = path.dirname(resolveFixture('test-driver/package.json'));
+
+// While this branch's Appium runs as a prerelease (e.g. a beta major train), `npm install
+// @appium/fake-driver` with no tag would resolve `latest` - a release line that doesn't
+// declare compatibility with the running prerelease major. Route npm-registry installs to the
+// `beta` dist-tag instead so they resolve to a version that actually supports it.
+const IS_PRERELEASE_SERVER = Boolean(semver.prerelease(APPIUM_VER));
+const FAKE_DRIVER_NPM_SPEC = IS_PRERELEASE_SERVER ? '@appium/fake-driver@beta' : '@appium/fake-driver';
+
+/**
+ * True for the specific rejection `ExtensionCliCommand#_checkInstallCompatibility` throws when an
+ * extension's declared peer requirement on `appium` doesn't cover the running server version -
+ * as opposed to some other, unrelated install failure.
+ */
+function isServerVersionIncompatibleError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes('cannot be installed because the server version it requires');
+}
+
+/**
+ * Installs `FAKE_DRIVER_NPM_SPEC` from npm, or skips the calling test if the currently-published
+ * version under that spec doesn't yet declare compatibility with the running (possibly
+ * prerelease) Appium - e.g. right after a fresh major bootstrap, before a follow-up release
+ * catches its peerDependencies range up. Self-resolves once that follow-up release ships.
+ */
+async function installFakeDriverOrSkip(
+  ctx: TestContext,
+  install: (args: string[]) => Promise<ExtRecord<DriverType>>,
+): Promise<ExtRecord<DriverType> | undefined> {
+  try {
+    return await install([FAKE_DRIVER_NPM_SPEC, '--source', 'npm']);
+  } catch (err) {
+    if (isServerVersionIncompatibleError(err)) {
+      ctx.skip(`${FAKE_DRIVER_NPM_SPEC} is not yet compatible with Appium ${APPIUM_VER}: ${(err as Error).message}`);
+      return undefined;
+    }
+    throw err;
+  }
+}
 
 const TEST_DRIVER_INVALID_PEERS_DIR = path.dirname(resolveFixture('test-driver-invalid-peer-dep/package.json'));
 
@@ -83,9 +122,9 @@ describe('Driver CLI', {timeout: 90000}, function () {
 
   describe(LIST, function () {
     it('should list available drivers', async function () {
-      const {stderr} = await runAppiumRaw(appiumHome, [DRIVER_TYPE, LIST], {});
+      const {stdout} = await runAppiumRaw(appiumHome, [DRIVER_TYPE, LIST], {});
       for (const d of Object.keys(KNOWN_DRIVERS)) {
-        assert.match(stderr, new RegExp(`${d}.+[not installed]`));
+        assert.match(stdout, new RegExp(`${d}.+[not installed]`));
       }
     });
 
@@ -109,20 +148,46 @@ describe('Driver CLI', {timeout: 90000}, function () {
       if (system.isWindows()) {
         return ctx.skip();
       }
-      const versions = JSON.parse(
-        (
-          await exec('npm', ['view', '@appium/fake-driver', 'versions', '--json'], {
-            encoding: 'utf-8',
-          })
-        ).stdout,
-      ) as string[];
+      const [versions, distTags] = await Promise.all([
+        exec('npm', ['view', '@appium/fake-driver', 'versions', '--json'], {encoding: 'utf-8'}).then(
+          ({stdout}) => JSON.parse(stdout) as string[],
+        ),
+        exec('npm', ['view', '@appium/fake-driver', 'dist-tags', '--json'], {encoding: 'utf-8'}).then(
+          ({stdout}) => JSON.parse(stdout) as Record<string, string>,
+        ),
+      ]);
 
-      // Update checks skip prereleases, so pick from stable versions to guarantee an update exists.
-      const stableVersions = versions.filter((v) => !prerelease(v));
-      const penultimateFakeDriverVersionAsOfRightNow = stableVersions[stableVersions.length - 2];
+      // Compare within the release line the running (possibly prerelease) Appium is actually
+      // compatible with, rather than blindly against the last-published version ever - which,
+      // right after a fresh major bootstrap, may be a still-incompatible `latest`.
+      // Update checks skip prereleases, so also exclude those to guarantee an update exists.
+      const referenceVersion = IS_PRERELEASE_SERVER ? distTags.beta : distTags.latest;
+      const sameLineVersions = versions.filter(
+        (v) => semver.major(v) === semver.major(referenceVersion) && !semver.prerelease(v),
+      );
+      if (sameLineVersions.length < 2) {
+        // Only the just-bootstrapped version exists in this release line so far; there's nothing
+        // older-but-compatible to install as a baseline yet. Self-resolves once a second release
+        // lands in this line.
+        return ctx.skip();
+      }
+      const penultimateFakeDriverVersionAsOfRightNow = sameLineVersions[sameLineVersions.length - 2];
 
       await resetAppiumHome();
-      await runInstall([`@appium/fake-driver@${penultimateFakeDriverVersionAsOfRightNow}`, '--source', 'npm']);
+      try {
+        await runInstall([`@appium/fake-driver@${penultimateFakeDriverVersionAsOfRightNow}`, '--source', 'npm']);
+      } catch (err) {
+        // The penultimate release in the line may predate a peerDependencies catch-up that
+        // followed a fresh major bootstrap, and so may not itself support the running server.
+        // Self-resolves once enough newer, compatible releases exist in the line.
+        if (isServerVersionIncompatibleError(err)) {
+          return ctx.skip(
+            `@appium/fake-driver@${penultimateFakeDriverVersionAsOfRightNow} is not yet compatible with ` +
+              `Appium ${APPIUM_VER}: ${(err as Error).message}`,
+          );
+        }
+        throw err;
+      }
       const listResult = (await runList(['--updates'])) as Record<
         string,
         {updateVersion?: string; unsafeUpdateVersion?: string}
@@ -138,8 +203,8 @@ describe('Driver CLI', {timeout: 90000}, function () {
         util.compareVersions(String(updateVersion), '>', penultimateFakeDriverVersionAsOfRightNow),
         true,
       );
-      const {stderr} = await runAppiumRaw(appiumHome, [DRIVER_TYPE, LIST, '--updates'], {});
-      assert.match(stderr, new RegExp(`fake.+[${updateVersion} available]`));
+      const {stdout} = await runAppiumRaw(appiumHome, [DRIVER_TYPE, LIST, '--updates'], {});
+      assert.match(stdout, new RegExp(`fake.+[${updateVersion} available]`));
     });
 
     describe('if a driver is not published to npm', function () {
@@ -161,8 +226,19 @@ describe('Driver CLI', {timeout: 90000}, function () {
       await assert.rejects(fs.stat(path.join(appiumHome, 'node_modules', 'appium')));
     });
 
-    it('should install a driver from the list of known drivers', async function () {
-      const ret = await runInstall(['uiautomator2']);
+    it('should install a driver from the list of known drivers', async function (ctx: TestContext) {
+      // uiautomator2 is a separate, externally-maintained package; while the running Appium is a
+      // prerelease, its published version(s) may not yet declare compatibility with it. Skip only
+      // for that specific reason, so this starts passing again the moment a compatible one ships.
+      let ret: ExtRecord<DriverType>;
+      try {
+        ret = await runInstall(['uiautomator2']);
+      } catch (err) {
+        if (isServerVersionIncompatibleError(err)) {
+          return ctx.skip(`uiautomator2 is not yet compatible with Appium ${APPIUM_VER}: ${(err as Error).message}`);
+        }
+        throw err;
+      }
       assert.strictEqual(ret.uiautomator2.pkgName, 'appium-uiautomator2-driver');
       assert.strictEqual(ret.uiautomator2.installType, 'npm');
       assert.strictEqual(ret.uiautomator2.installSpec, 'uiautomator2');
@@ -175,11 +251,14 @@ describe('Driver CLI', {timeout: 90000}, function () {
       });
     });
 
-    it('should install a driver from npm', async function () {
-      const ret = await runInstall(['@appium/fake-driver', '--source', 'npm']);
+    it('should install a driver from npm', async function (ctx: TestContext) {
+      const ret = await installFakeDriverOrSkip(ctx, runInstall);
+      if (!ret) {
+        return;
+      }
       assert.strictEqual(ret.fake.pkgName, '@appium/fake-driver');
       assert.strictEqual(ret.fake.installType, 'npm');
-      assert.strictEqual(ret.fake.installSpec, '@appium/fake-driver');
+      assert.strictEqual(ret.fake.installSpec, FAKE_DRIVER_NPM_SPEC);
       const list = await runList(['--installed']);
       const rest = omitKeys(list.fake ?? {}, ['installed', 'repositoryUrl']);
       assertDeepInclude(rest, {
@@ -189,8 +268,10 @@ describe('Driver CLI', {timeout: 90000}, function () {
       });
     });
 
-    it('should install a driver from npm and a local driver', async function () {
-      await runInstall(['@appium/fake-driver', '--source', 'npm']);
+    it('should install a driver from npm and a local driver', async function (ctx: TestContext) {
+      if (!(await installFakeDriverOrSkip(ctx, runInstall))) {
+        return;
+      }
       await installLocalExtension(appiumHome, DRIVER_TYPE, TEST_DRIVER_DIR);
       const list = await runList(['--installed']);
       assert.ok(list.fake);
@@ -199,9 +280,18 @@ describe('Driver CLI', {timeout: 90000}, function () {
       await resolveFrom(appiumHome, '@appium/test-driver/package.json');
     });
 
-    it('should install _two_ drivers from npm', async function () {
-      await runInstall(['@appium/fake-driver', '--source', 'npm']);
-      await runInstall(['appium-uiautomator2-driver', '--source', 'npm']);
+    it('should install _two_ drivers from npm', async function (ctx: TestContext) {
+      if (!(await installFakeDriverOrSkip(ctx, runInstall))) {
+        return;
+      }
+      try {
+        await runInstall(['appium-uiautomator2-driver', '--source', 'npm']);
+      } catch (err) {
+        if (isServerVersionIncompatibleError(err)) {
+          return ctx.skip(`uiautomator2 is not yet compatible with Appium ${APPIUM_VER}: ${(err as Error).message}`);
+        }
+        throw err;
+      }
       const list = await runList(['--installed']);
       assert.ok(list.fake);
       assert.ok(list.uiautomator2);
@@ -299,9 +389,9 @@ describe('Driver CLI', {timeout: 90000}, function () {
           [DRIVER_TYPE, INSTALL, '--source', 'local', TEST_DRIVER_INVALID_PEERS_DIR],
           {},
         );
-        if ('stderr' in ret) {
-          assert.match(ret.stderr, /may be incompatible with the current version of Appium/i);
-          assert.match(ret.stderr, /successfully installed/i);
+        if ('stdout' in ret) {
+          assert.match(ret.stdout, /may be incompatible with the current version of Appium/i);
+          assert.match(ret.stdout, /successfully installed/i);
         }
       });
     });
@@ -309,9 +399,9 @@ describe('Driver CLI', {timeout: 90000}, function () {
     describe('when peer dependencies are valid', function () {
       it('should not display a warning', async function () {
         const ret = await runAppiumRaw(appiumHome, [DRIVER_TYPE, INSTALL, '--source', 'local', TEST_DRIVER_DIR], {});
-        if ('stderr' in ret) {
-          assert.doesNotMatch(ret.stderr, /may be incompatible with the current version of Appium/i);
-          assert.match(ret.stderr, /successfully installed/i);
+        if ('stdout' in ret) {
+          assert.doesNotMatch(ret.stdout, /may be incompatible with the current version of Appium/i);
+          assert.match(ret.stdout, /successfully installed/i);
         }
       });
     });

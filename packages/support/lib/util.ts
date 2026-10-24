@@ -1,21 +1,18 @@
 import {randomUUID} from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
 import stream from 'node:stream';
 import {isDeepStrictEqual, promisify} from 'node:util';
 
 import {asyncmap} from 'asyncbox';
-import B from 'bluebird';
 import pluralizeLib from 'pluralize';
 import * as semver from 'semver';
 import {parse as shellParse, quote as shellQuote} from 'shell-quote';
 
-import {fs} from './fs';
-import {createBase64EncodeStream} from './internal';
+import {fs} from './fs.js';
+import {createBase64EncodeStream} from './internal/index.js';
 export {shellParse};
 import type {Element} from '@appium/types';
 import * as _lockfile from 'lockfile';
-import {v1 as uuidV1Lib, v3 as uuidV3Lib, v5 as uuidV5Lib} from 'uuid';
 
 /** W3C WebDriver element identifier key used in element objects. */
 export const W3C_WEB_ELEMENT_IDENTIFIER = 'element-6066-11e4-a52e-4f735466cecf';
@@ -31,33 +28,12 @@ export const GiB = MiB * 1024;
 export type NonEmptyString<T extends string = string> = T extends '' ? never : T;
 
 /**
- * @deprecated This helper is slated for removal. Please migrate callers away from UUID v1.
- */
-export function uuidV1(...args: Parameters<typeof uuidV1Lib>): ReturnType<typeof uuidV1Lib> {
-  return uuidV1Lib(...args);
-}
-
-/**
- * @deprecated This helper is slated for removal. Please migrate callers away from UUID v3.
- */
-export function uuidV3(...args: Parameters<typeof uuidV3Lib>): ReturnType<typeof uuidV3Lib> {
-  return uuidV3Lib(...args);
-}
-
-/**
  * Generates a v4 UUID using Node.js crypto.
  *
  * @returns A UUID v4 string
  */
 export function uuidV4(): string {
   return randomUUID();
-}
-
-/**
- * @deprecated This helper is slated for removal. Please migrate callers away from UUID v5.
- */
-export function uuidV5(...args: Parameters<typeof uuidV5Lib>): ReturnType<typeof uuidV5Lib> {
-  return uuidV5Lib(...args);
 }
 
 /**
@@ -127,6 +103,8 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
  * @param value - Value to check
  * @returns `true` if the value is empty
  */
+export function isEmpty(value: unknown[] | null | undefined): value is [] | null | undefined;
+export function isEmpty(value: unknown): boolean;
 export function isEmpty(value: unknown): boolean {
   if (value == null) {
     return true;
@@ -214,7 +192,7 @@ export function escapeSpace(str: string): string {
  * @param quoteEscape - Optional character to escape, or `false` to skip
  * @returns Escaped string, or original value if `str` is not a string
  */
-export function escapeSpecialChars(str: string | unknown, quoteEscape?: string | false): string | unknown {
+export function escapeSpecialChars(str: unknown, quoteEscape?: string | false): unknown {
   if (typeof str !== 'string') {
     return str;
   }
@@ -234,64 +212,6 @@ export function escapeSpecialChars(str: string | unknown, quoteEscape?: string |
   }
   const re = new RegExp(quoteEscape, 'g');
   return result.replace(re, `\\${quoteEscape}`);
-}
-
-/**
- * Returns the first non-internal IPv4 address of the machine, if any.
- *
- * @deprecated This helper is slated for removal. Consider implementing this functionality on your side.
- * @returns The local IPv4 address, or `undefined` if none found
- */
-export function localIp(): string | undefined {
-  const ifaces = os.networkInterfaces();
-  for (const addrs of Object.values(ifaces)) {
-    if (!addrs) {
-      continue;
-    }
-    for (const iface of addrs) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        return iface.address;
-      }
-    }
-  }
-  return undefined;
-}
-
-/**
- * Creates a promise that resolves after a delay and can be cancelled via `.cancel()`.
- *
- * @deprecated This helper is slated for removal. Please migrate callers away from Bluebird.
- * @param ms - Delay in milliseconds before the promise resolves
- * @returns A Bluebird promise with a `cancel()` method; cancel rejects with CancellationError
- */
-export function cancellableDelay(ms: number): B<void> & {cancel: () => void} {
-  let timer: NodeJS.Timeout;
-  let resolve: () => void;
-  let reject: (err: Error) => void;
-
-  const delay = new B<void>((_resolve, _reject) => {
-    resolve = _resolve;
-    reject = _reject;
-    timer = setTimeout(() => resolve(), ms);
-  });
-
-  (delay as B<void> & {cancel: () => void}).cancel = function () {
-    clearTimeout(timer);
-    reject(new B.CancellationError());
-  };
-  return delay as B<void> & {cancel: () => void};
-}
-
-/**
- * Resolves each root path with the given path segments, returning an array of absolute paths.
- *
- * @deprecated This helper is slated for removal. Consider implementing this functionality on your side.
- * @param roots - Base directory paths to resolve against
- * @param args - Path segments to join with each root (e.g. 'foo', 'bar' → root/foo/bar)
- * @returns Array of absolute paths, one per root
- */
-export function multiResolve(roots: string[], ...args: string[]): string[] {
-  return roots.map((root) => path.resolve(root, ...args));
 }
 
 /**
@@ -379,10 +299,7 @@ export function wrapElement(elementId: string): Element {
  * @param predicate - Optional filter: undefined (drop undefined values), scalar (value match), or function
  * @returns New object with only the properties that pass the predicate
  */
-export function filterObject<T extends Record<string, unknown>>(
-  obj: T,
-  predicate?: ((value: unknown, obj: T) => boolean) | unknown,
-): Partial<T> {
+export function filterObject<T extends Record<string, unknown>>(obj: T, predicate?: unknown): Partial<T> {
   const newObj = {...obj} as Record<string, unknown>;
   let pred: (v: unknown, o: T) => boolean;
   if (predicate === undefined) {
@@ -558,19 +475,7 @@ export function compareVersions(ver1: string, operator: string, ver2: string): b
  * @returns Quoted string suitable for shell parsing
  */
 export function quote(args: string | string[]): string {
-  return (Array.isArray(args) ? args : [args])
-    .map((arg) => {
-      // shell-quote escapes ! inside double quotes when the argument contains an
-      // apostrophe. Non-interactive POSIX shells preserve that extra backslash.
-      // Temporary workaround; remove once the dependency includes the released fix:
-      // https://github.com/KazuCocoa/shell-quote/commit/9a70e24
-      // Keep the regression tests when switching back to shellQuote.
-      if (typeof arg === 'string' && arg.includes("'") && arg.includes('!')) {
-        return `'${arg.replace(/'/g, `'"'"'`)}'`;
-      }
-      return shellQuote([arg]);
-    })
-    .join(' ');
+  return shellQuote(Array.isArray(args) ? args : [args]);
 }
 
 /**

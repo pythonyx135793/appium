@@ -46,7 +46,7 @@ export const MOBILE_DRIVERS = Object.freeze({
 
 export const DESKTOP_DRIVERS = Object.freeze({
   mac2: 'appium-mac2-driver',
-  windows: 'appium-windows-driver',
+  wincore: 'appium-wincore-driver',
 } as const);
 
 export const DESKTOP_BROWSERS = Object.freeze({
@@ -74,6 +74,11 @@ export const CACHE_DIR_RELATIVE_PATH = path.join('node_modules', '.cache', 'appi
  * Relative path to hashfile (from `APPIUM_HOME`) of consuming project's `package.json` (if it exists)
  */
 export const PKG_HASHFILE_RELATIVE_PATH = path.join(CACHE_DIR_RELATIVE_PATH, 'package.hash');
+
+/**
+ * Relative path to lockfile used when installing an extension via `appium`
+ */
+export const INSTALL_LOCKFILE_RELATIVE_PATH = path.join(CACHE_DIR_RELATIVE_PATH, '.install.lock');
 
 export const EXT_SUBCOMMAND_LIST = 'list';
 export const EXT_SUBCOMMAND_INSTALL = 'install';
@@ -110,3 +115,8 @@ export const BIDI_EVENT_NAME = 'bidiEvent';
  * The name of the insecure feature that allows retrieving the list of active server sessions
  */
 export const SESSION_DISCOVERY_FEATURE = 'session_discovery';
+
+/**
+ * The name of the insecure feature that allows CORS requests from any host
+ */
+export const CORS_FEATURE = 'cors';

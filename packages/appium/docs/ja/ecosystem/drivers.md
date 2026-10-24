@@ -17,34 +17,34 @@ If you maintain an Appium driver that you would like to be listed here, feel fre
 
 These drivers are currently maintained by the Appium team:
 
-### [Chromium](https://appium.github.io/appium-chromium-driver/)
+### [Chromium](https://github.com/appium/appium-chromium-driver)
 
-- Target: Desktop Chromium-based browsers (Chrome, Microsoft Edge, etc.)
+- Target: Desktop and mobile Chromium browsers (Chrome, Microsoft Edge, etc.)
 - Mode: Web
 
 ```sh title="Install This Driver"
 appium driver install chromium
 ```
 
-### [Espresso](https://appium.github.io/appium-espresso-driver/)
+### [Espresso](https://github.com/appium/appium-espresso-driver)
 
-- Target: Android applications (mobile, TV, Wear, XR, Automotive)
-- Mode: Native, Hybrid, Web
+- Target: Android applications
+- Mode: Native
 
 ```sh title="Install This Driver"
 appium driver install espresso
 ```
 
-### [Gecko](https://appium.github.io/appium-geckodriver/)
+### [Gecko](https://github.com/appium/appium-geckodriver)
 
-- Target: Desktop and mobile Gecko-based browsers (Firefox, etc.)
+- Target: Desktop and mobile Gecko browsers (Firefox)
 - Mode: Web
 
 ```sh title="Install This Driver"
 appium driver install gecko
 ```
 
-### [Mac2](https://appium.github.io/appium-mac2-driver/)
+### [Mac2](https://github.com/appium/appium-mac2-driver)
 
 - Target: macOS applications
 - Mode: Native
@@ -53,7 +53,7 @@ appium driver install gecko
 appium driver install mac2
 ```
 
-### [Safari](https://appium.github.io/appium-safari-driver/)
+### [Safari](https://github.com/appium/appium-safari-driver)
 
 - Target: Desktop and mobile Safari browsers
 - Mode: Web
@@ -62,9 +62,9 @@ appium driver install mac2
 appium driver install safari
 ```
 
-### [UiAutomator2](https://appium.github.io/appium-uiautomator2-driver/)
+### [UiAutomator2](https://github.com/appium/appium-uiautomator2-driver)
 
-- Target: Android applications (mobile, TV, Wear, XR, Automotive)
+- Target: Android, Android TV, Android Wear applications
 - Modes: Native, Hybrid, Web
 
 ```sh title="Install This Driver"
@@ -89,7 +89,7 @@ appium driver install windows
 
 ### [XCUITest](https://appium.github.io/appium-xcuitest-driver/)
 
-- Target: iOS, iPadOS, tvOS, watchOS applications
+- Target: iOS, iPadOS, tvOS applications
 - Modes: Native, Hybrid, Web
 
 ```sh title="Install This Driver"

@@ -133,7 +133,7 @@ appium plugin uninstall <plugin-name>
 ## Server Command Line Interface
 
 In order to start sending commands to the Appium server, it must be running on the URL and port
-where your client library expects it to listen. [Appium's command-line interface](https://appium.io/docs/en/latest/reference/cli/)
+where your client library expects it to listen. [Appium's command-line interface](http://appium.io/docs/en/latest/cli/server/)
 is used to launch and configure the server:
 
 ```bash
@@ -161,7 +161,7 @@ for the particular driver or whether it supports parallel sessions.
    automation, all using the WebDriver model that's already the standard for web automation.
 5. You can run your automated tests locally and in a cloud. There are multiple cloud providers that
    support various Appium drivers (mostly targeting iOS and Android mobile automation).
-6. [Appium Inspector](https://appium.github.io/appium-inspector/) can be used to visually inspect
+6. [Appium Inspector](https://github.com/appium/appium-inspector) can be used to visually inspect
    the page source of applications across different platforms, facilitating easier test development.
 
 Investing in the [WebDriver](https://w3c.github.io/webdriver/webdriver-spec.html) protocol means you

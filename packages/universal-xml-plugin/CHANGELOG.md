@@ -3,12 +3,56 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
-## [3.0.1](https://github.com/appium/appium/compare/@appium/universal-xml-plugin@3.0.0...@appium/universal-xml-plugin@3.0.1) (2026-09-24)
+## [4.0.0-beta.5](https://github.com/appium/appium/compare/@appium/universal-xml-plugin@4.0.0-beta.4...@appium/universal-xml-plugin@4.0.0-beta.5) (2026-10-18)
 
 **Note:** Version bump only for package @appium/universal-xml-plugin
 
 
 
+
+
+## [4.0.0-beta.4](https://github.com/appium/appium/compare/@appium/universal-xml-plugin@4.0.0-beta.3...@appium/universal-xml-plugin@4.0.0-beta.4) (2026-10-09)
+
+### Bug Fixes
+
+* **universal-xml-plugin:** keep the enabled attribute in transformed source ([#22911](https://github.com/appium/appium/issues/22911)) ([3063ec9](https://github.com/appium/appium/commit/3063ec99175454125cf4f277272b97de866fcbe2))
+
+
+## [4.0.0-beta.3](https://github.com/appium/appium/compare/@appium/universal-xml-plugin@4.0.0-beta.2...@appium/universal-xml-plugin@4.0.0-beta.3) (2026-10-05)
+
+### Features
+
+* **universal-xml-plugin:** add execute methods to toggle translation ([#22862](https://github.com/appium/appium/issues/22862)) ([b95aaac](https://github.com/appium/appium/commit/b95aaac60bed065ce0a0d1e4f7baf9c5e60572b1)), closes [#21630](https://github.com/appium/appium/issues/21630)
+
+
+## [4.0.0-beta.2](https://github.com/appium/appium/compare/@appium/universal-xml-plugin@4.0.0-beta.1...@appium/universal-xml-plugin@4.0.0-beta.2) (2026-09-27)
+
+**Note:** Version bump only for package @appium/universal-xml-plugin
+
+
+
+
+
+## [4.0.0-beta.1](https://github.com/appium/appium/compare/@appium/universal-xml-plugin@4.0.0-beta.0...@appium/universal-xml-plugin@4.0.0-beta.1) (2026-09-19)
+
+### Bug Fixes
+
+* **deps:** catch up peerDependencies to published beta.0; drop bootstrap_packages ([#22793](https://github.com/appium/appium/issues/22793)) ([b09efc3](https://github.com/appium/appium/commit/b09efc31c6967bbcf2c4314db9d2a0b6454fa8fb))
+
+
+## [4.0.0-beta.0](https://github.com/appium/appium/compare/@appium/universal-xml-plugin@3.0.0...@appium/universal-xml-plugin@4.0.0-beta.0) (2026-09-19)
+
+### ⚠ BREAKING CHANGES
+
+* the minimum supported Node.js engine is set to ^22.22.2 || ^24.15.0 || &gt;&#x3D;26.0.0
+
+### Features
+
+* bump minimum supported Node.js engine to ^22.22.2 || ^24.15.0 || &gt;&#x3D;26.0.0 ([#22685](https://github.com/appium/appium/issues/22685)) ([9f4a11e](https://github.com/appium/appium/commit/9f4a11e7190290986d01743557e90e6e44f87638))
+
+### Bug Fixes
+
+* declare dependencies that were only resolving via hoisting ([#22758](https://github.com/appium/appium/issues/22758)) ([bcf1c57](https://github.com/appium/appium/commit/bcf1c579997b8dbb8292b1a77583aeef40b11ba4))
 
 
 ## [3.0.0](https://github.com/appium/appium/compare/@appium/universal-xml-plugin@2.1.7...@appium/universal-xml-plugin@3.0.0) (2026-08-24)

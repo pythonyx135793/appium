@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import {afterEach, beforeEach, describe, it} from 'node:test';
 
-import {fs} from '../../lib/fs';
-import {isWindows} from '../../lib/system';
-import {openDir} from '../../lib/tempdir';
+import {fs} from '../../lib/fs.js';
+import {isWindows} from '../../lib/system.js';
+import {openDir} from '../../lib/tempdir.js';
 
 describe('fs', function () {
   describe('mv()', function () {
@@ -66,6 +66,101 @@ describe('fs', function () {
       assert.strictEqual((await fs.readFile(srcPath)).toString(), 'bar');
     });
 
+    it('should not delete an empty directory when the destination is missing', async function () {
+      const srcPath = path.join(srcRoot!, 'empty');
+      await fs.mkdir(srcPath);
+      const dstPath = path.join(dstRoot!, 'missing');
+      await assert.rejects(fs.mv(srcPath, dstPath), /destination does not exist/);
+      assert.strictEqual(await fs.exists(srcPath), true);
+      assert.strictEqual(await fs.exists(dstPath), false);
+    });
+
+    for (const isDirectory of [false, true]) {
+      for (const clobber of [false, true]) {
+        it(
+          `should change only name casing on Windows: directory=${isDirectory}, clobber=${clobber}`,
+          {
+            skip: !isWindows(),
+          },
+          async function () {
+            const source = path.join(srcRoot!, 'app');
+            const destination = path.join(srcRoot!, 'App');
+            if (isDirectory) {
+              await fs.mkdir(source);
+              await fs.writeFile(path.join(source, 'payload'), 'keep');
+            } else {
+              await fs.writeFile(source, 'keep');
+            }
+
+            await fs.mv(source, destination, {clobber});
+
+            assert.deepEqual(await fs.readdir(srcRoot!), ['App']);
+            assert.equal(
+              await fs.readFile(isDirectory ? path.join(destination, 'payload') : destination, 'utf8'),
+              'keep',
+            );
+          },
+        );
+      }
+    }
+
+    it('should preserve a Windows directory junction pointing to the source', {skip: !isWindows()}, async function () {
+      const source = path.join(srcRoot!, 'source');
+      const alias = path.join(srcRoot!, 'alias');
+      await fs.mkdir(source);
+      await fs.writeFile(path.join(source, 'payload'), 'keep');
+      await fs.symlink(source, alias, 'junction');
+
+      await fs.mv(source, alias);
+
+      assert.equal(await fs.readFile(path.join(source, 'payload'), 'utf8'), 'keep');
+      assert.equal((await fs.lstat(alias)).isSymbolicLink(), true);
+    });
+
+    it('should not delete an empty directory when the destination is a file', async function () {
+      const srcPath = path.join(srcRoot!, 'empty');
+      await fs.mkdir(srcPath);
+      const dstPath = path.join(dstRoot!, 'file');
+      await fs.writeFile(dstPath, 'keep');
+      await assert.rejects(fs.mv(srcPath, dstPath), /not a directory/);
+      assert.strictEqual(await fs.exists(srcPath), true);
+      assert.strictEqual(await fs.readFile(dstPath, 'utf8'), 'keep');
+    });
+
+    it('should keep an empty subdirectory when the destination directory already exists', async function () {
+      const srcPath = path.join(srcRoot!, 'src');
+      await fs.mkdirp(path.join(srcPath, 'empty'));
+      await fs.writeFile(path.join(srcPath, 'note.txt'), 'keep');
+      const dstPath = path.join(dstRoot!, 'dst');
+      await fs.mkdir(dstPath);
+      await fs.mv(srcPath, dstPath);
+      assert.strictEqual(await fs.exists(srcPath), false);
+      assert.strictEqual(await fs.readFile(path.join(dstPath, 'note.txt'), 'utf8'), 'keep');
+      assert.strictEqual((await fs.stat(path.join(dstPath, 'empty'))).isDirectory(), true);
+    });
+
+    it('should move nested files into an existing destination directory', async function () {
+      const srcPath = path.join(srcRoot!, 'src');
+      await fs.mkdirp(path.join(srcPath, 'sub'));
+      await fs.writeFile(path.join(srcPath, 'a.txt'), 'a');
+      await fs.writeFile(path.join(srcPath, 'sub', 'b.txt'), 'b');
+      const dstPath = path.join(dstRoot!, 'dst');
+      await fs.mkdir(dstPath);
+      await fs.mv(srcPath, dstPath);
+      assert.strictEqual(await fs.exists(srcPath), false);
+      assert.strictEqual(await fs.readFile(path.join(dstPath, 'a.txt'), 'utf8'), 'a');
+      assert.strictEqual(await fs.readFile(path.join(dstPath, 'sub', 'b.txt'), 'utf8'), 'b');
+    });
+
+    it('should move an empty directory when mkdirp creates the destination', async function () {
+      const srcPath = path.join(srcRoot!, 'empty');
+      await fs.mkdir(srcPath);
+      const dstPath = path.join(dstRoot!, 'moved');
+      await fs.mv(srcPath, dstPath, {mkdirp: true});
+      assert.strictEqual(await fs.exists(srcPath), false);
+      assert.strictEqual((await fs.stat(dstPath)).isDirectory(), true);
+    });
+
     it('should reject moving a directory into itself', async function () {
       const srcPath = path.join(srcRoot!, 'foo', 'src.file');
       await fs.mkdirp(path.dirname(srcPath));
@@ -122,7 +217,7 @@ describe('fs', function () {
     describe('when the path exists', {skip: isWindows()}, function () {
       describe('when the path is not executable', function () {
         it('should return `false`', async function () {
-          assert.strictEqual(await fs.isExecutable(__filename), false);
+          assert.strictEqual(await fs.isExecutable(import.meta.filename), false);
         });
       });
 

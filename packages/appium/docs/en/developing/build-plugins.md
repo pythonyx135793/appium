@@ -107,10 +107,6 @@ to install it locally first:
 appium plugin install --source=local /path/to/your/plugin
 ```
 
-Install the plugin's dependencies and build it in its source directory first. A local install
-links that directory directly into Appium's home without creating a global npm link or copying
-the source. Restart the Appium server to load changes to the plugin.
-
 And of course, plugins must be "activated" during Appium server start, so make sure you direct your
 users to do so:
 
@@ -261,7 +257,7 @@ throw new errors.NoSuchElementError();
 ### Log messages to the Appium log
 
 You can always use `console.log`, of course, but Appium provides a nice logger for you as
-`this.logger` (it has `.info`, `.debug`, `.log`, `.warn`, `.error` methods on it for differing log
+`this.log` (it has `.info`, `.debug`, `.warn`, `.error` methods on it for differing log
 levels). If you want to create an Appium logger outside of a plugin context (say in a script or
 helper file), you can always construct your own too:
 
@@ -480,7 +476,7 @@ capability.
 
 You probably don't normally need to update the Appium server object (which is an
 [Express](https://expressjs.com/) server having already been
-[configured](https://github.com/appium/appium/blob/master/packages/base-driver/lib/express/server.ts)
+[configured](https://github.com/appium/appium/blob/master/packages/http-server/lib/server.ts)
 in a variety of ways). But, for example, you could add new routes to the server to support your
 plugin's requirements. To update the server you must implement the `static async updateServer`
 method in your class. This method takes three parameters:

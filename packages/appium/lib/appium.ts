@@ -4,9 +4,9 @@ import {
   CREATE_SESSION_COMMAND,
   DELETE_SESSION_COMMAND,
   DriverCore,
-  errors,
   type ExtensionCore,
   generateDriverLogPrefix,
+  getProxyReq,
   GET_STATUS_COMMAND,
   isSessionCommand,
   isW3cCaps,
@@ -15,14 +15,16 @@ import {
   promoteAppiumOptions,
   promoteAppiumOptionsForObject,
   PROTOCOLS,
+  runWithCommandTimeout,
+  withoutProxyReq,
 } from '@appium/base-driver';
-import {util} from '@appium/support';
+import {util, net} from '@appium/support';
 import type {
   AppiumServer,
   DriverCaps,
-  DriverData,
   DriverOpts,
   ExternalDriver,
+  HTTPMethod,
   IAppiumIpc,
   Plugin,
   PluginClass,
@@ -35,15 +37,20 @@ import type {
 } from '@appium/types';
 import type WebSocket from 'ws';
 
-import * as bidiCommands from './bidi-commands';
-import {BIDI_BASE_PATH, DRIVER_TYPE, SESSION_DISCOVERY_FEATURE} from './constants';
-import type {DriverConfig} from './extension/driver-config';
-import {APPIUM_VER, getBuildInfo, updateBuildInfo} from './helpers/build';
-import {makeNonW3cCapsError, parseCapsForInnerDriver, type ParsedDriverCaps, pullSettings} from './helpers/capability';
-import * as insecureFeatures from './insecure-features';
-import * as inspectorCommands from './inspector-commands';
-import {getDefaultsForExtension} from './schema';
-import {compact, pickBy, pull} from './utils';
+import * as bidiCommands from './bidi-commands.js';
+import {BIDI_BASE_PATH, DRIVER_TYPE, SESSION_DISCOVERY_FEATURE} from './constants.js';
+import type {DriverConfig} from './extension/driver-config.js';
+import {APPIUM_VER, getBuildInfo, updateBuildInfo} from './helpers/build.js';
+import {
+  makeNonW3cCapsError,
+  parseCapsForInnerDriver,
+  type ParsedDriverCaps,
+  pullSettings,
+} from './helpers/capability.js';
+import * as insecureFeatures from './insecure-features.js';
+import * as inspectorCommands from './inspector-commands.js';
+import {getDefaultsForExtension} from './schema/index.js';
+import {pickBy} from './utils/index.js';
 
 const desiredCapabilityConstraints = {
   automationName: {
@@ -59,6 +66,14 @@ const desiredCapabilityConstraints = {
 export type AppiumDriverConstraints = typeof desiredCapabilityConstraints;
 export type W3CAppiumDriverCaps = W3CDriverCaps<AppiumDriverConstraints>;
 
+/**
+ * {@link DriverCaps} with `webSocketUrl` widened to `string`: the client sends it as a boolean,
+ * but the inner driver's response carries the resolved BiDi URL as a string.
+ */
+type DriverCapsWithBidiUrl = Omit<DriverCaps<AppiumDriverConstraints>, 'webSocketUrl'> & {
+  webSocketUrl?: string | boolean;
+};
+
 /** Result shape for umbrella {@link AppiumDriver.createSession} / {@link AppiumDriver.deleteSession}. */
 interface SessionHandlerResult<V = unknown> {
   value?: V;
@@ -66,28 +81,13 @@ interface SessionHandlerResult<V = unknown> {
   protocol?: string;
 }
 
-type SessionHandlerCreateResult = SessionHandlerResult<
-  [string, DriverCaps<AppiumDriverConstraints>, string | undefined]
->;
+type SessionHandlerCreateResult = SessionHandlerResult<[string, DriverCapsWithBidiUrl, string | undefined]>;
 
 type SessionHandlerDeleteResult = SessionHandlerResult<void>;
 
-/**
- * Tuple shape of the deprecated multi-argument overload of {@link AppiumDriver.createSession}.
- * Shared between that overload's declaration and its implementation signature so the parameter
- * list only needs to be written out once.
- *
- * @deprecated Use the single-argument overload of {@link AppiumDriver.createSession} instead.
- */
-type LegacyCreateSessionArgs = [
-  w3cCapabilities1: W3CAppiumDriverCaps,
-  w3cCapabilities2?: W3CAppiumDriverCaps,
-  w3cCapabilities3?: W3CAppiumDriverCaps,
-];
-
 /** @internal Not part of {@link ExternalDriver}; used only when wiring session IPC. */
 type IpcAssignable = {
-  assignIpc?: (ipc: IAppiumIpc) => Promise<void>;
+  assignIpc: (ipc: IAppiumIpc) => Promise<void>;
 };
 
 /**
@@ -96,8 +96,6 @@ type IpcAssignable = {
  */
 export class AppiumDriver extends DriverCore<AppiumDriverConstraints> {
   readonly sessions: Record<string, ExternalDriver> = {};
-
-  readonly pendingDrivers: Record<string, ExternalDriver[]> = {};
 
   /**
    * The umbrella driver does not observe its own command timeout; inner session drivers do.
@@ -169,7 +167,7 @@ export class AppiumDriver extends DriverCore<AppiumDriverConstraints> {
   }
 
   /** The umbrella driver does not queue commands; inner session drivers may. */
-  get isCommandsQueueEnabled(): boolean {
+  override get isCommandsQueueEnabled(): boolean {
     return false;
   }
 
@@ -278,46 +276,48 @@ export class AppiumDriver extends DriverCore<AppiumDriverConstraints> {
    * Creates a session: picks an inner driver from caps, runs plugin hooks, and returns a protocol
    * envelope with either `[sessionId, caps, protocol]` or an error.
    *
-   * @param w3cCapabilities - the new session capabilities in W3C format
+   * @param rawW3cCapabilities - the new session capabilities in W3C format
    */
-  async createSession(w3cCapabilities: W3CAppiumDriverCaps): Promise<SessionHandlerCreateResult>;
-  /**
-   * @deprecated Legacy call sites may pass the same W3C caps in up to three positions. These
-   * positions are intended to carry the same value; if they differ, which one wins is
-   * unspecified. Use the single-argument overload of {@linkcode createSession} instead.
-   */
-  async createSession(...legacyArgs: LegacyCreateSessionArgs): Promise<SessionHandlerCreateResult>;
-  async createSession(...legacyArgs: LegacyCreateSessionArgs): Promise<SessionHandlerCreateResult> {
-    const [w3cCapabilities1, w3cCapabilities2, w3cCapabilities3] = legacyArgs;
-    const defaultCapabilities = structuredClone(this.args.defaultCapabilities);
-    const defaultSettings = pullSettings((defaultCapabilities ?? {}) as StringRecord);
-    const w3cCapabilities = structuredClone([w3cCapabilities3, w3cCapabilities2, w3cCapabilities1].find(isW3cCaps));
-    if (!w3cCapabilities) {
+  async createSession(rawW3cCapabilities: W3CAppiumDriverCaps): Promise<SessionHandlerCreateResult> {
+    const defaultCapabilities = promoteAppiumOptionsForObject(structuredClone(this.args.defaultCapabilities ?? {}));
+    const defaultSettings = pullSettings(defaultCapabilities as StringRecord);
+    if (!isW3cCaps(rawW3cCapabilities)) {
       throw makeNonW3cCapsError();
     }
-    const w3cSettings = {
+    const w3cCapabilities = promoteAppiumOptions(structuredClone(rawW3cCapabilities));
+    const sharedSettings = {
       ...defaultSettings,
       ...pullSettings(w3cCapabilities.alwaysMatch ?? {}),
     };
+    if (w3cCapabilities.firstMatch === undefined) {
+      w3cCapabilities.firstMatch = [{}];
+    }
+    // Carry each candidate's settings through capability selection independently.
     for (const firstMatchEntry of w3cCapabilities.firstMatch ?? []) {
-      Object.assign(w3cSettings, pullSettings(firstMatchEntry));
+      const settings = {...sharedSettings, ...pullSettings(firstMatchEntry)};
+      if (util.isPlainObject(firstMatchEntry) && !util.isEmpty(settings)) {
+        (firstMatchEntry as StringRecord)['appium:settings'] = settings;
+      }
     }
 
     const protocol = PROTOCOLS.W3C;
     let innerSessionId: string;
-    let dCaps: DriverCaps<AppiumDriverConstraints> & {webSocketUrl?: string | boolean};
+    let registeredSessionId: string | undefined;
+    let dCaps: DriverCapsWithBidiUrl;
     try {
       // Parse the caps into a format that the InnerDriver will accept
       const parsedCaps = parseCapsForInnerDriver<AppiumDriverConstraints>(
-        promoteAppiumOptions(w3cCapabilities),
+        w3cCapabilities,
         this.desiredCapConstraints,
-        defaultCapabilities ? promoteAppiumOptionsForObject(defaultCapabilities) : undefined,
+        defaultCapabilities,
       );
 
       if ('error' in parsedCaps && parsedCaps.error) {
         throw parsedCaps.error;
       }
       const {desiredCaps, processedW3CCapabilities} = parsedCaps as ParsedDriverCaps<AppiumDriverConstraints>;
+      const w3cSettings = pullSettings(desiredCaps);
+      pullSettings(processedW3CCapabilities.alwaysMatch);
 
       const {
         driver: InnerDriver,
@@ -329,9 +329,6 @@ export class AppiumDriver extends DriverCore<AppiumDriverConstraints> {
       if (this.args.sessionOverride) {
         await this.deleteAllSessions();
       }
-
-      let runningDriversData: DriverData[] = [];
-      let otherPendingDriversData: DriverData[] = [];
 
       const driverInstance = new InnerDriver(this.args, true) as unknown as ExternalDriver;
 
@@ -360,38 +357,20 @@ export class AppiumDriver extends DriverCore<AppiumDriverConstraints> {
       driverInstance.serverPort = this.args.port;
       driverInstance.serverPath = this.args.basePath;
 
-      try {
-        runningDriversData = (await this.curSessionDataForDriver(InnerDriver)) ?? [];
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        throw new errors.SessionNotCreatedError(msg);
-      }
-      this.pendingDrivers[InnerDriver.name] = this.pendingDrivers[InnerDriver.name] || [];
-      otherPendingDriversData = compact(this.pendingDrivers[InnerDriver.name].map((drv) => drv.driverData));
-      this.pendingDrivers[InnerDriver.name].push(driverInstance);
-
-      try {
-        [innerSessionId, dCaps] = (await driverInstance.createSession(
-          processedW3CCapabilities as never,
-          processedW3CCapabilities,
-          processedW3CCapabilities,
-          [...runningDriversData, ...otherPendingDriversData],
-        )) as [string, DriverCaps<AppiumDriverConstraints> & {webSocketUrl?: string | boolean}];
-        this.sessions[innerSessionId] = driverInstance;
-        // create an IPC channel for the driver and all plugins on this session
-        this.sessionIpcs[innerSessionId] = new AppiumIpc({
-          maxObjSize: this.args.maxIpcDataSize,
-          maxTopics: this.args.maxIpcTopics,
-          log: driverInstance.log,
-        });
-        const extDriver = driverInstance as unknown as IpcAssignable;
-        if (typeof extDriver.assignIpc === 'function') {
-          // TODO remove this existence guard as a breaking change in Appium 3
-          await extDriver.assignIpc(this.sessionIpcs[innerSessionId]);
-        }
-      } finally {
-        pull(this.pendingDrivers[InnerDriver.name], driverInstance);
-      }
+      [innerSessionId, dCaps] = (await driverInstance.createSession(processedW3CCapabilities as never)) as [
+        string,
+        DriverCapsWithBidiUrl,
+      ];
+      this.sessions[innerSessionId] = driverInstance;
+      registeredSessionId = innerSessionId;
+      // create an IPC channel for the driver and all plugins on this session
+      this.sessionIpcs[innerSessionId] = new AppiumIpc({
+        maxObjSize: this.args.maxIpcDataSize,
+        maxTopics: this.args.maxIpcTopics,
+        log: driverInstance.log,
+      });
+      const extDriver = driverInstance as unknown as IpcAssignable;
+      await extDriver.assignIpc(this.sessionIpcs[innerSessionId]);
 
       this.attachUnexpectedShutdownHandler(driverInstance, innerSessionId);
 
@@ -399,9 +378,6 @@ export class AppiumDriver extends DriverCore<AppiumDriverConstraints> {
         `New ${InnerDriver.name} session created successfully, session ` +
           `${innerSessionId} added to master session list`,
       );
-
-      // set the New Command Timeout for the inner driver
-      await driverInstance.startNewCommandTimeout();
 
       // apply initial values to Appium settings (if provided)
       if (driverInstance.isW3CProtocol() && !util.isEmpty(w3cSettings)) {
@@ -418,17 +394,32 @@ export class AppiumDriver extends DriverCore<AppiumDriverConstraints> {
         const {address, port, basePath} = this.args;
         const scheme = `ws${this.server.isSecure() ? 's' : ''}`;
         const host = bidiCommands.determineBiDiHost(address);
-        const bidiUrl = `${scheme}://${host}:${port}${basePath}${BIDI_BASE_PATH}/${innerSessionId}`;
+        const urlHost = net.formatHostnameForUrl(host);
+        const bidiUrl = `${scheme}://${urlHost}:${port}${basePath}${BIDI_BASE_PATH}/${innerSessionId}`;
         this.log.info(
           `Upstream driver responded with webSocketUrl ${dCaps.webSocketUrl}, will rewrite to ` +
             `${bidiUrl} for response to client`,
         );
-        // @ts-ignore webSocketUrl gets sent by the client as a boolean, but then it is supposed
-        // to come back from the server as a string. TODO figure out how to express this in our
-        // capability constraint system
         dCaps.webSocketUrl = bidiUrl;
       }
+
+      // The session becomes idle only after all initialization has completed.
+      await driverInstance.startNewCommandTimeout();
     } catch (error: unknown) {
+      if (registeredSessionId) {
+        try {
+          // A failed initialization must not leave a registered session or an idle timer,
+          // even if the driver's own deleteSession also fails.
+          try {
+            await this.sessions[registeredSessionId]?.clearNewCommandTimeout();
+          } finally {
+            await this.deleteSession(registeredSessionId);
+          }
+        } catch (cleanupError) {
+          const message = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+          this.log.warn(`Could not clean up failed session ${registeredSessionId}: ${message}`);
+        }
+      }
       return {
         protocol,
         error: error instanceof Error ? error : new Error(String(error)),
@@ -455,8 +446,9 @@ export class AppiumDriver extends DriverCore<AppiumDriverConstraints> {
             this.log.debug(`Plugin ${plugin.name} defines an unexpected shutdown handler; calling it now`);
             try {
               await plugin.onUnexpectedShutdown(driver, cause);
-            } catch (e) {
-              this.log.warn(`Got an error when running plugin ${plugin.name} shutdown handler: ${e}`);
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              this.log.warn(`Got an error when running plugin ${plugin.name} shutdown handler: ${message}`);
             }
           } else {
             this.log.debug(`Plugin ${plugin.name} does not define an unexpected shutdown handler`);
@@ -465,6 +457,7 @@ export class AppiumDriver extends DriverCore<AppiumDriverConstraints> {
       }
 
       this.log.info(`Removing session '${innerSessionId}' from our master session list`);
+      this.cleanupBidiSockets(innerSessionId);
       this.deleteLinkedSessionObjects(innerSessionId);
     };
 
@@ -479,41 +472,14 @@ export class AppiumDriver extends DriverCore<AppiumDriverConstraints> {
   }
 
   /**
-   * Collects `driverData` for every active session whose driver class matches `InnerDriver.name`
-   * (used when creating another session of the same driver type).
-   * @remarks `InnerDriver` is expected to be the driver class; only `.name` is read.
-   */
-  async curSessionDataForDriver(InnerDriver: {name: string}): Promise<DriverData[]> {
-    const data = compact(
-      Object.values(this.sessions)
-        .filter((s) => s.constructor.name === InnerDriver.name)
-        .map((s) => s.driverData),
-    );
-    for (const datum of data) {
-      if (!datum) {
-        throw new Error(
-          `Problem getting session data for driver type ` + `${InnerDriver.name}; does it implement 'get driverData'?`,
-        );
-      }
-    }
-    return data;
-  }
-
-  /**
    * Ends one session: removes it from the master list immediately, then delegates to the inner
-   * driver’s `deleteSession` with sibling-session metadata.
+   * driver’s `deleteSession`.
    */
   async deleteSession(sessionId: string): Promise<SessionHandlerDeleteResult> {
     let protocol: Protocol | undefined;
     try {
-      let otherSessionsData: DriverData[] | undefined;
-      let dstSession: ExternalDriver | undefined;
-      if (this.sessions[sessionId]) {
-        const curConstructorName = this.sessions[sessionId].constructor.name;
-        otherSessionsData = Object.entries(this.sessions)
-          .filter(([key, value]) => value.constructor.name === curConstructorName && key !== sessionId)
-          .map(([, value]) => value.driverData);
-        dstSession = this.sessions[sessionId];
+      const dstSession: ExternalDriver | undefined = this.sessions[sessionId];
+      if (dstSession) {
         protocol = dstSession.protocol;
         this.cleanupBidiSockets(sessionId);
       }
@@ -525,7 +491,7 @@ export class AppiumDriver extends DriverCore<AppiumDriverConstraints> {
 
       return {
         protocol,
-        value: await dstSession.deleteSession(sessionId, otherSessionsData),
+        value: await dstSession.deleteSession(sessionId),
       };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -640,13 +606,9 @@ export class AppiumDriver extends DriverCore<AppiumDriverConstraints> {
     const isUmbrellaCmd = isAppiumDriverCommand(cmd);
     const isSessionCmd = isSessionCommand(cmd);
 
-    // if a plugin override proxying for this command and that is why we are here instead of just
-    // letting the protocol proxy the command entirely, determine that, get the request object for
-    // use later on, then clean up the args
-    const reqForProxy = args.at(-1)?.reqForProxy;
-    if (reqForProxy) {
-      args.pop();
-    }
+    // if a plugin overrode proxying for this command and that is why we are here instead of just
+    // letting the protocol proxy the command entirely, get the request object for use later on
+    const reqForProxy = getProxyReq();
 
     // first do some error checking. If we're requesting a session command execution, then make
     // sure that session actually exists on the session driver, and set the session driver itself
@@ -670,14 +632,6 @@ export class AppiumDriver extends DriverCore<AppiumDriverConstraints> {
 
     // get any plugins which are registered as handling this command
     const plugins = this.pluginsToHandleCmd(cmd, sessionId);
-
-    // if any plugins are going to handle this command, we can't guarantee that the default
-    // driver's executeCommand method will be called, which means we can't guarantee that the
-    // newCommandTimeout will be cleared. So we do it here as well.
-    if (plugins.length && dstSession) {
-      this.log.debug('Clearing new command timeout pre-emptively since plugin(s) will handle this command');
-      await dstSession.clearNewCommandTimeout();
-    }
 
     // now we define a 'cmdHandledBy' object which will keep track of which plugins have handled this
     // command. we care about this because (a) multiple plugins can handle the same command, and
@@ -710,7 +664,12 @@ export class AppiumDriver extends DriverCore<AppiumDriverConstraints> {
         if (!dstSession?.proxyCommand) {
           throw new NoDriverProxyCommandError();
         }
-        return await dstSession.proxyCommand(reqForProxy.originalUrl, reqForProxy.method, reqForProxy.body);
+        return await dstSession.executeCommand(
+          'proxyCommand',
+          reqForProxy.originalUrl,
+          reqForProxy.method as HTTPMethod,
+          reqForProxy.body,
+        );
       }
 
       if (isGetStatus) {
@@ -738,21 +697,17 @@ export class AppiumDriver extends DriverCore<AppiumDriverConstraints> {
       cmdHandledBy,
       next: defaultBehavior,
     });
-    const res = await this.executeWrappedCommand({wrappedCmd, protocol});
+    // clear the ambient proxy request while the plugin/default chain runs, so a plugin that
+    // re-enters executeCommand for a different command doesn't inherit and misuse this one
+    const execute = () => withoutProxyReq(() => this.executeWrappedCommand({wrappedCmd, protocol}));
+    // Keep the timer suspended through the entire plugin chain, including work after next().
+    // Plugins may handle a command themselves or continue processing after the driver returns.
+    const res =
+      dstSession && plugins.length
+        ? await runWithCommandTimeout(dstSession, execute, {restart: cmd !== DELETE_SESSION_COMMAND})
+        : await execute();
 
-    // if we had plugins, make sure to log out the helpful report about which plugins ended up
-    // handling the command and which didn't
     this.logPluginHandlerReport(plugins, {cmd, cmdHandledBy});
-
-    // if we had plugins, and if they did not ultimately call the default handler, this means our
-    // new command timeout was not restarted by the default handler's executeCommand call, so
-    // restart it here using the same logic as in BaseDriver's executeCommand
-    if (dstSession && !cmdHandledBy.default && dstSession.isCommandsQueueEnabled && cmd !== DELETE_SESSION_COMMAND) {
-      this.log.debug(
-        'Restarting new command timeout via umbrella driver since plugin did not ' + 'allow default handler to execute',
-      );
-      await dstSession.startNewCommandTimeout();
-    }
 
     // And finally, if the command was createSession, we want to migrate any plugins which were
     // previously sessionless to use the new sessionId, so that plugins can share state between
@@ -771,10 +726,7 @@ export class AppiumDriver extends DriverCore<AppiumDriverConstraints> {
         }
         // we also want to assign the IPC channel for this session to the plugins
         const extPlugin = p as unknown as IpcAssignable;
-        if (typeof extPlugin.assignIpc === 'function') {
-          // TODO remove this existence guard as a breaking change in Appium 4
-          await extPlugin.assignIpc(this.sessionIpcs[newSessionId]);
-        }
+        await extPlugin.assignIpc(this.sessionIpcs[newSessionId]);
       }
       this.sessionlessPlugins = [];
     }
@@ -799,7 +751,7 @@ export class AppiumDriver extends DriverCore<AppiumDriverConstraints> {
     plugins: Plugin[];
   }): () => Promise<unknown> {
     if (plugins.length) {
-      this.log.info(`Plugins which can handle cmd '${cmd}': ${plugins.map((p) => p.name)}`);
+      this.log.info(`Plugins which can handle cmd '${cmd}': ${plugins.map((p) => p.name).join(', ')}`);
     }
 
     // now we can go through each plugin and wrap `next` around its own handler, passing the *old*

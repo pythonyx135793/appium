@@ -31,10 +31,6 @@ installing it only installs the core Appium server, without any drivers.
 
 When it comes to installing Appium 2 drivers, there are several approaches you can take:
 
-* Add the `--drivers` flag when installing Appium, for example:
-```bash
-npm i -g appium --drivers=xcuitest,uiautomator2
-```
 * Use the [Appium Extension CLI](../reference/cli/extensions.md), for example:
 ```bash
 appium driver install uiautomator2
@@ -106,10 +102,10 @@ and it is recommended to migrate to the following replacements:
 
 |Appium 1 Package|Replacement in Appium 2|
 |--|--|
-|iOS Driver|[XCUITest Driver](https://appium.github.io/appium-xcuitest-driver/)|
-|UiAutomator Driver|[UiAutomator2](https://appium.github.io/appium-uiautomator2-driver/)|
+|iOS Driver|[XCUITest Driver](https://appium.github.io/appium-xcuitest-driver/latest/)|
+|UiAutomator Driver|[UiAutomator2](https://github.com/appium/appium-uiautomator2-driver/)|
 |`wd` Client|[WebdriverIO Client](https://webdriver.io/)|
-|Appium Desktop|[Appium Inspector](https://appium.github.io/appium-inspector/)|
+|Appium Desktop|[Appium Inspector](https://github.com/appium/appium-inspector)|
 
 !!! info "Actions Needed"
 

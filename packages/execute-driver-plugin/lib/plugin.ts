@@ -1,7 +1,7 @@
 import cp from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
-import {timing} from '@appium/support';
+import {timing, net} from '@appium/support';
 import type {ExternalDriver, MethodMap, NextPluginCallback, PluginCommand} from '@appium/types';
 import {BasePlugin} from 'appium/plugin.js';
 
@@ -70,7 +70,8 @@ export class ExecuteDriverPlugin extends BasePlugin {
           // Appium probably won't be behind ssl locally; if it ever is, might need to update this to
           // provide a user configurable parameter
           protocol: 'http',
-          hostname: driver.serverHost,
+          // webdriverio puts the hostname into its request URLs as is
+          hostname: net.formatHostnameForUrl(driver.serverHost),
           port: driver.serverPort,
           path: driver.serverPath,
         },

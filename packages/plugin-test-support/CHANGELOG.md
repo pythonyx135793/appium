@@ -3,12 +3,54 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
-## [3.0.1](https://github.com/appium/appium/compare/@appium/plugin-test-support@3.0.0...@appium/plugin-test-support@3.0.1) (2026-09-24)
+## [4.0.0-beta.5](https://github.com/appium/appium/compare/@appium/plugin-test-support@4.0.0-beta.4...@appium/plugin-test-support@4.0.0-beta.5) (2026-10-18)
 
 **Note:** Version bump only for package @appium/plugin-test-support
 
 
 
+
+
+## [4.0.0-beta.4](https://github.com/appium/appium/compare/@appium/plugin-test-support@4.0.0-beta.3...@appium/plugin-test-support@4.0.0-beta.4) (2026-10-09)
+
+**Note:** Version bump only for package @appium/plugin-test-support
+
+
+
+
+
+## [4.0.0-beta.3](https://github.com/appium/appium/compare/@appium/plugin-test-support@4.0.0-beta.2...@appium/plugin-test-support@4.0.0-beta.3) (2026-10-05)
+
+**Note:** Version bump only for package @appium/plugin-test-support
+
+
+
+
+
+## [4.0.0-beta.2](https://github.com/appium/appium/compare/@appium/plugin-test-support@4.0.0-beta.1...@appium/plugin-test-support@4.0.0-beta.2) (2026-09-27)
+
+**Note:** Version bump only for package @appium/plugin-test-support
+
+
+
+
+
+## [4.0.0-beta.1](https://github.com/appium/appium/compare/@appium/plugin-test-support@4.0.0-beta.0...@appium/plugin-test-support@4.0.0-beta.1) (2026-09-19)
+
+### Bug Fixes
+
+* **deps:** catch up peerDependencies to published beta.0; drop bootstrap_packages ([#22793](https://github.com/appium/appium/issues/22793)) ([b09efc3](https://github.com/appium/appium/commit/b09efc31c6967bbcf2c4314db9d2a0b6454fa8fb))
+
+
+## [4.0.0-beta.0](https://github.com/appium/appium/compare/@appium/plugin-test-support@3.0.0...@appium/plugin-test-support@4.0.0-beta.0) (2026-09-19)
+
+### ⚠ BREAKING CHANGES
+
+* the minimum supported Node.js engine is set to ^22.22.2 || ^24.15.0 || &gt;&#x3D;26.0.0
+
+### Features
+
+* bump minimum supported Node.js engine to ^22.22.2 || ^24.15.0 || &gt;&#x3D;26.0.0 ([#22685](https://github.com/appium/appium/issues/22685)) ([9f4a11e](https://github.com/appium/appium/commit/9f4a11e7190290986d01743557e90e6e44f87638))
 
 
 ## [3.0.0](https://github.com/appium/appium/compare/@appium/plugin-test-support@2.0.1...@appium/plugin-test-support@3.0.0) (2026-08-24)

@@ -3,8 +3,9 @@ import os from 'node:os';
 import {promisify} from 'node:util';
 
 import type {ExtensionCore} from '@appium/base-driver';
-import {errors} from '@appium/base-driver';
-import {util} from '@appium/support';
+import {errors, runWithCommandTimeout} from '@appium/base-driver';
+import {fetchInterfaces, isBroadcastIp, V4_BROADCAST_IP} from '@appium/http-server';
+import {net, util} from '@appium/support';
 import type {
   BiDiResultData,
   ErrorBiDiCommandResponse,
@@ -13,17 +14,17 @@ import type {
   StringRecord,
   SuccessBiDiCommandResponse,
 } from '@appium/types';
-import WebSocket from 'ws';
+import {WebSocket} from 'ws';
 
-import type {AppiumDriver} from './appium';
-import {BIDI_BASE_PATH, BIDI_EVENT_NAME} from './constants';
-import {fetchInterfaces, isBroadcastIp, V4_BROADCAST_IP} from './helpers/network';
-import {capitalize} from './utils';
+import type {AppiumDriver} from './appium.js';
+import {BIDI_BASE_PATH, BIDI_EVENT_NAME} from './constants.js';
+import {capitalize} from './utils/index.js';
 
 type ExtensionPlugin = Plugin & ExtensionCore;
 type AnyDriver = ExternalDriver | AppiumDriver;
 type SendData = (data: string | Buffer) => Promise<void>;
 type LogSocketError = (err: Error) => void;
+type PendingProxyCommands = Map<number, Set<() => void>>;
 interface InitBiDiSocketResult {
   bidiHandlerDriver: AnyDriver;
   bidiHandlerPlugins: ExtensionPlugin[];
@@ -33,22 +34,7 @@ interface InitBiDiSocketResult {
   logSocketErr: LogSocketError;
 }
 
-/**
- * Close codes defined by RFC 6455, section 7.4.1 and the IANA registry.
- * https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1
- */
-const WebSocketCloseCode = {
-  NORMAL_CLOSURE: 1000,
-  GOING_AWAY: 1001,
-  RESERVED: 1004,
-  NO_STATUS_RECEIVED: 1005,
-  ABNORMAL_CLOSURE: 1006,
-  INTERNAL_ERROR: 1011,
-  BAD_GATEWAY: 1014,
-} as const;
-// RFC 6455, section 7.4.2: https://www.rfc-editor.org/rfc/rfc6455#section-7.4.2
-const MIN_APPLICATION_CLOSE_CODE = 3000;
-const MAX_APPLICATION_CLOSE_CODE = 4999;
+const {WebSocketCloseCode, MIN_APPLICATION_CLOSE_CODE, MAX_APPLICATION_CLOSE_CODE} = net;
 const RESERVED_CLOSE_CODES: readonly number[] = [
   WebSocketCloseCode.RESERVED,
   WebSocketCloseCode.NO_STATUS_RECEIVED,
@@ -138,7 +124,10 @@ export async function onBidiMessage(
       throw new errors.InvalidArgumentError(`Missing params for BiDi operation in '${dataTruncated}`);
     }
     const executeWrappedCommand = wrapCommandWithPlugins(driver as ExtensionCore, plugins, method, params);
-    const result = await executeWrappedCommand();
+    const result =
+      driver === this
+        ? await executeWrappedCommand()
+        : await runWithCommandTimeout(driver as ExternalDriver, executeWrappedCommand);
     resMessage = {
       id,
       type: 'success',
@@ -186,8 +175,7 @@ export function cleanupBidiSockets(this: AppiumDriver, sessionId: string): void 
   try {
     this.log.debug(`Closing bidi socket(s) associated with session ${sessionId}`);
     for (const ws of this.bidiSockets[sessionId]) {
-      // 1001 means server is going away
-      ws.close(1001);
+      ws.close(WebSocketCloseCode.GOING_AWAY);
     }
   } catch {}
   delete this.bidiSockets[sessionId];
@@ -198,8 +186,8 @@ export function cleanupBidiSockets(this: AppiumDriver, sessionId: string): void 
   }
   this.log.debug(`Also closing proxy connection to upstream bidi server`);
   try {
-    // 1000 means normal closure, which seems correct when Appium is acting as the client
-    proxyClient.close(1000);
+    // normal closure seems correct when Appium is acting as the client
+    proxyClient.close(WebSocketCloseCode.NORMAL_CLOSURE);
   } catch {}
   delete this.bidiProxyClients[sessionId];
 }
@@ -353,7 +341,7 @@ function initBidiProxyHandlers(this: AnyDriver, proxyClient: WebSocket, ws: WebS
   // client as well
   proxyClient.on('close', (code, reason) => {
     driverLog.debug(
-      `Upstream bidi socket closed connection (code ${code}, reason: '${reason}'). ` +
+      `Upstream bidi socket closed connection (code ${code}, reason: '${reason?.toString()}'). ` +
         `Closing proxy connection to client`,
     );
     const closeCode = toSendableCloseCode(code);
@@ -397,6 +385,7 @@ function initBidiSocketHandlers(
   logSocketErr: LogSocketError,
 ): void {
   const driverLog = bidiHandlerDriver.log;
+  const pendingProxyCommands = trackBidiProxyCommands(proxyClient);
   // Can't do much with random errors on the connection other than log them
   ws.on('error', logSocketErr);
 
@@ -408,24 +397,29 @@ function initBidiSocketHandlers(
   // coming from the client
   // First is incoming messages from the client
   ws.on('message', async (data: Buffer) => {
-    if (proxyClient && sendToProxy) {
-      // if we're meant to proxy to an upstream bidi socket, just do that
-      // TODO trying to determine how this proxying behaviour would interface with plugins is too
-      // complex for now, so just ignore plugins in this case
-      await sendToProxy(data.toString('utf8'));
-    } else {
-      const res = await this.onBidiMessage(data, bidiHandlerDriver, bidiHandlerPlugins);
-      await send(JSON.stringify(res));
+    try {
+      if (proxyClient && sendToProxy) {
+        // if we're meant to proxy to an upstream bidi socket, just do that
+        // TODO trying to determine how this proxying behaviour would interface with plugins is too
+        // complex for now, so just ignore plugins in this case
+        await sendBidiProxyCommand(data, bidiHandlerDriver, proxyClient, sendToProxy, pendingProxyCommands);
+      } else {
+        const res = await this.onBidiMessage(data, bidiHandlerDriver, bidiHandlerPlugins);
+        await send(JSON.stringify(res));
+      }
+    } catch (err) {
+      logSocketErr(err instanceof Error ? err : new Error(String(err)));
     }
   });
 
   // Next consider if the client closes the socket connection on us
   ws.on('close', (code, reason) => {
+    finishBidiProxyCommands(pendingProxyCommands);
     // Not sure if we need to do anything here if the client closes the websocket connection.
     // Probably if a session was started via the socket, and the socket closes, we should end the
     // associated session to free up resources. But otherwise, for sockets attached to existing
     // sessions, doing nothing is probably right.
-    driverLog.debug(`BiDi socket connection closed (code ${code}, reason: '${reason}')`);
+    driverLog.debug(`BiDi socket connection closed (code ${code}, reason: '${reason?.toString()}')`);
 
     // If we're proxying, might as well close the upstream connection and clean it up
     if (proxyClient) {
@@ -438,6 +432,94 @@ function initBidiSocketHandlers(
       driverLog.debug(`BiDi events statistics: ${JSON.stringify(eventLogCounts, null, 2)}`);
     }
   });
+}
+
+/** Track proxied commands until an upstream response or socket termination. */
+function trackBidiProxyCommands(proxyClient: WebSocket | null): PendingProxyCommands {
+  const pendingCommands: PendingProxyCommands = new Map();
+  if (!proxyClient) {
+    return pendingCommands;
+  }
+
+  // Sending a frame is not command completion. Events do not complete commands either.
+  proxyClient.on('message', (data) => {
+    try {
+      let payload: Buffer;
+      if (Array.isArray(data)) {
+        payload = Buffer.concat(data);
+      } else if (Buffer.isBuffer(data)) {
+        payload = data;
+      } else {
+        payload = Buffer.from(data);
+      }
+      const response = JSON.parse(payload.toString());
+      if (typeof response.id === 'number' && ['success', 'error'].includes(response.type)) {
+        finishBidiProxyCommands(pendingCommands, response.id);
+      }
+    } catch {
+      // Preserve opaque upstream messages; this observer only manages command activity.
+    }
+  });
+  proxyClient.once('close', () => finishBidiProxyCommands(pendingCommands));
+  proxyClient.on('error', () => finishBidiProxyCommands(pendingCommands));
+  return pendingCommands;
+}
+
+/** Forward a command while keeping the idle timer suspended until its response arrives. */
+async function sendBidiProxyCommand(
+  data: Buffer,
+  driver: AnyDriver,
+  proxyClient: WebSocket,
+  sendToProxy: SendData,
+  pendingCommands: PendingProxyCommands,
+): Promise<void> {
+  await runWithCommandTimeout(driver as ExternalDriver, async () => {
+    let id: number | undefined;
+    try {
+      const command = JSON.parse(data.toString());
+      if (typeof command.id === 'number') {
+        id = command.id;
+      }
+    } catch {
+      // The upstream server is responsible for rejecting malformed commands.
+    }
+    let response: Promise<void> | undefined;
+    if (id !== undefined) {
+      response = new Promise<void>((resolve) => {
+        const pending = pendingCommands.get(id) ?? new Set();
+        pending.add(resolve);
+        pendingCommands.set(id, pending);
+      });
+    }
+    await sendToProxy(data.toString('utf8'));
+    if (proxyClient.readyState !== WebSocket.OPEN) {
+      finishBidiProxyCommands(pendingCommands);
+    }
+    await response;
+  });
+}
+
+/** Release one activity guard per response, or every guard on a terminated connection. */
+function finishBidiProxyCommands(pendingCommands: PendingProxyCommands, id?: number): void {
+  if (id !== undefined) {
+    const pending = pendingCommands.get(id);
+    const finish = pending?.values().next().value;
+    if (pending && finish) {
+      // BiDi IDs are not necessarily unique. One response completes only one command.
+      pending.delete(finish);
+      if (pending.size === 0) {
+        pendingCommands.delete(id);
+      }
+      finish();
+    }
+    return;
+  }
+  for (const key of pendingCommands.keys()) {
+    for (const finish of pendingCommands.get(key) ?? []) {
+      finish();
+    }
+    pendingCommands.delete(key);
+  }
 }
 
 /**
@@ -500,8 +582,12 @@ function initBidiEventListeners(
         return;
       }
 
-      const eventSubs = bidiHandlerDriver.bidiEventSubs[method];
-      if (Array.isArray(eventSubs) && eventSubs.includes(context)) {
+      const moduleName = method.split('.')[0];
+      const isSubscribed = [method, moduleName].some((event) => {
+        const contexts = bidiHandlerDriver.bidiEventSubs[event];
+        return Array.isArray(contexts) && (contexts.includes('') || contexts.includes(context));
+      });
+      if (isSubscribed) {
         if (method in eventLogCounts) {
           ++eventLogCounts[method];
         } else {
@@ -566,7 +652,8 @@ async function assertIsOpen(ws: WebSocket, timeoutMs: number = 5000): Promise<We
 }
 
 /**
- * Replace close codes that cannot be sent in a WebSocket close frame.
+ * 'close' events can report reserved codes like 1005 and 1006, which RFC 6455 forbids in a close
+ * frame and ws throws on, so anything ws would reject is replaced with an internal error
  */
 function toSendableCloseCode(code: number): number {
   const isStandard =

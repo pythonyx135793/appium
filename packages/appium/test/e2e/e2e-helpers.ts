@@ -5,11 +5,11 @@ import path from 'node:path';
  */
 import {console as supportConsole, fs} from '@appium/support';
 import type {DriverType, PluginType} from '@appium/types';
-import type {CliExtensionSubcommand, ExtRecord} from 'appium/types';
+import type {CliExtensionSubcommand, ExtRecord} from 'appium/types/index.js';
 import {exec} from 'teen_process';
 import type {ExecError} from 'teen_process';
 
-import {APPIUM_ROOT, resolveFixture} from '../helpers';
+import {APPIUM_ROOT, resolveFixture} from '../helpers.js';
 
 export const EXECUTABLE = path.join(APPIUM_ROOT, 'build', 'lib', 'main.js');
 
@@ -96,7 +96,8 @@ async function run(
       stderr: strip(retval.stderr),
     };
   } catch (err) {
-    const {stdout = '', stderr = ''} = err as ExecError & {stdout?: string; stderr?: string};
+    // oxlint-disable-next-line typescript/no-useless-default-assignment -- the process may fail before teen_process adds the streams
+    const {stdout = '', stderr = ''} = err as ExecError;
     const execErr = err as ExecError;
     const baseErr = err instanceof Error ? err : new Error(String(err));
     const runErr = Object.assign(baseErr, {
