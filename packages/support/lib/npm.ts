@@ -221,8 +221,13 @@ export class NPM {
       installOpts.push('--save-exact', '--global-style', '--no-package-lock');
     }
 
-    const cmd = installType === 'local' ? 'link' : 'install';
-    const res = await this.exec(cmd, [...installOpts, installStr], {
+    if (installType === 'local') {
+      // Link directly from Appium's home without npm link's global-prefix intermediary.
+      // Override user configuration so edits to the source remain visible.
+      installOpts.push('--install-links=false');
+    }
+    const installArg = installType === 'local' && system.isWindows() ? quoteLocalPathForCmd(installStr) : installStr;
+    const res = await this.exec('install', [...installOpts, installArg], {
       cwd,
       json: true,
       lockFile: this._getInstallLockfilePath(cwd),
@@ -317,3 +322,12 @@ export async function resolveFrom(fromDirectory: string, moduleId: string): Prom
 }
 
 export const npm = new NPM();
+
+// npm.cmd forwards its arguments through a second cmd.exe parsing pass. Protect both
+// passes, including percent expansion, rather than only surrounding spaces with quotes.
+// Backslashes before quotes (including the closing quote) follow Windows argv rules.
+function quoteLocalPathForCmd(value: string): string {
+  const argument = `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`;
+  const metacharacters = /[ !%^&()<>|"]/g;
+  return argument.replace(metacharacters, '^$&').replace(metacharacters, '^$&');
+}

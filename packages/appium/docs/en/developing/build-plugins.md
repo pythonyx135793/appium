@@ -107,6 +107,10 @@ to install it locally first:
 appium plugin install --source=local /path/to/your/plugin
 ```
 
+Install the plugin's dependencies and build it in its source directory first. A local install
+links that directory directly into Appium's home without creating a global npm link or copying
+the source. Restart the Appium server to load changes to the plugin.
+
 And of course, plugins must be "activated" during Appium server start, so make sure you direct your
 users to do so:
 

@@ -122,6 +122,11 @@ to install it locally first:
 appium driver install --source=local /path/to/your/driver
 ```
 
+Install the driver's dependencies and build it in its source directory first. A local install
+links that directory directly into Appium's home without creating a global npm link or copying
+the source. Changes remain available for development; see [Refreshing your driver during
+development](#refreshing-your-driver-during-development) for when Appium reloads them.
+
 ### Developing your driver
 
 How you develop your driver is up to you. It is convenient, however, to run it from within Appium
