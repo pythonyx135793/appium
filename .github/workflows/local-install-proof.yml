@@ -1,0 +1,38 @@
+name: Local extension install proof
+on:
+  push:
+    branches: [codex/proof-local-extension-install-r939]
+permissions:
+  contents: read
+jobs:
+  local-install:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - node: 20.19.0
+            npm: 10.0.0
+          - node: 24.19.0
+            npm: 11.17.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: proof
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: a1bdd0c48332aa7f13bb3fe32ae85fdf2fc395ed
+          path: source
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      - name: Isolated setup and actual CLI regressions
+        env:
+          EXPECTED_NODE: ${{ matrix.node }}
+          SELECTED_NPM: ${{ matrix.npm }}
+        run: node proof/.proof/run-linux.mjs "$GITHUB_WORKSPACE/source" "$RUNNER_TEMP/appium-local-install-r939"
