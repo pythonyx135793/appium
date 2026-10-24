@@ -28,6 +28,10 @@ const shim = path.join(root, 'bin');
 for (const directory of [childHome, prefix, cache, appiumHome, temporary, shim]) {
   fs.mkdirSync(directory);
 }
+if (process.platform !== 'win32') {
+  // Match npm's Unix global-prefix layout before taking the unchanged-prefix snapshot.
+  fs.mkdirSync(path.join(prefix, 'lib', 'node_modules'), {recursive: true});
+}
 const userConfig = path.join(root, 'npm-user.rc');
 const globalConfig = path.join(root, 'npm-global.rc');
 fs.writeFileSync(userConfig, '');
