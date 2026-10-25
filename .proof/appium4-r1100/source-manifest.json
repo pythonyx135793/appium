@@ -1,0 +1,29 @@
+{
+  "head": "c520a938c1302005877c159d28f30fa5f201b71d",
+  "tree": "71cee1cf40850b102820118f783d91e54ca3af08",
+  "parents": [
+    "9554050cc92cb5eb05c353da6185f10e48c486d7"
+  ],
+  "base": "52c92d6acd72d93ee9fc428b0ff473ae60bc52f4",
+  "base_tree": "310f485846a66ffed9d29ba1c37e5dac6bcb5701",
+  "merge": "9554050cc92cb5eb05c353da6185f10e48c486d7",
+  "merge_parents": [
+    "a1bdd0c48332aa7f13bb3fe32ae85fdf2fc395ed",
+    "52c92d6acd72d93ee9fc428b0ff473ae60bc52f4"
+  ],
+  "changed_files": [
+    {
+      "path": "packages/appium/lib/utils/npm.ts",
+      "blob": "7acd67548e993b1e0e218329db824dc000c93d57",
+      "sha256": "be3a84abf5d3784aba862503d8ccc354aa75b9e8e1bf2f65611f7a6543ca8c9c",
+      "bytes": 10693
+    },
+    {
+      "path": "packages/appium/test/unit/utils/npm.spec.ts",
+      "blob": "085318a1eb2c81ead75f15e19b3b7152a4f77a4a",
+      "sha256": "f61728ecfa2450f63da33f7fd96ff5f810a5ddbecf7d439834526e79b0533611",
+      "bytes": 5633
+    }
+  ],
+  "lock_sha256": "175532b209171a8cf2fd42fea703b3ee4d8e339b58b5e913522fded4f59917bb"
+}

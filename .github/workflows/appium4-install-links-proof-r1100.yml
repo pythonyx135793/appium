@@ -1,0 +1,56 @@
+name: Appium 4 local install proof R1100
+on:
+  push:
+    branches: [codex/appium4-install-links-proof-r1100]
+permissions:
+  contents: read
+jobs:
+  proof:
+    if: github.repository == 'pythonyx135793/appium'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - node: '22.22.2'
+            npm: '10.0.0'
+            sha256: 88fd1ce767091fd8d4a99fdb2356e98c819f93f3b1f8663853a2dee9b438068a
+          - node: '24.15.0'
+            npm: '11.17.0'
+            sha256: 472655581fb851559730c48763e0c9d3bc25975c59d518003fc0849d3e4ba0f6
+          - node: '26.0.0'
+            npm: '11.17.0'
+            sha256: 345d558514c62622b5c7d1f7b5f2a19c31ab1405d217df49f010c5ea8decc0f4
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 4
+      - name: Download exact official Node release
+        env:
+          NODE_VERSION: ${{ matrix.node }}
+          NODE_SHA256: ${{ matrix.sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/node-v$NODE_VERSION-linux-x64.tar.xz"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz" -o "$archive"
+          printf '%s  %s\n' "$NODE_SHA256" "$archive" | sha256sum --check --strict
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+      - name: Original controls and complete current source proof
+        env:
+          NODE_VERSION: ${{ matrix.node }}
+          NPM_VERSION: ${{ matrix.npm }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/node-v$NODE_VERSION-linux-x64/bin/node" .proof/appium4-r1100/run-linux.mjs setup "$GITHUB_WORKSPACE" "$RUNNER_TEMP/appium4-work-$NODE_VERSION" "$RUNNER_TEMP/appium4-evidence-$NODE_VERSION" "$NODE_VERSION" "$NPM_VERSION" "$(id -u)" "$(id -g)"
+      - name: Preserve actual proof and failure evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: appium4-install-links-r1100-node-${{ matrix.node }}
+          path: ${{ runner.temp }}/appium4-evidence-${{ matrix.node }}
+          if-no-files-found: error
+          retention-days: 30
